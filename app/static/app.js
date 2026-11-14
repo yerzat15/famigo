@@ -19,10 +19,17 @@ const Famigo = (() => {
     el.textContent = left > 0 ? `${left} free plan${left === 1 ? "" : "s"} left this month` : "Free plans used";
   }
   function showPaywall() { $("#paywall").classList.remove("hidden"); $("#paywall-close").focus(); }
+  // мягкий paywall: показываем подписку, но «Maybe later» всё равно строит план — никто не застрянет
+  let pendingPlan = null;
+  function closePaywall() {
+    $("#paywall").classList.add("hidden");
+    const body = pendingPlan; pendingPlan = null;
+    if (body) requestPlan(body);
+  }
   function initPaywall() {
     const close = $("#paywall-close");
-    if (close) close.onclick = () => $("#paywall").classList.add("hidden");
-    document.onkeydown = (e) => { if (e.key === "Escape") $("#paywall").classList.add("hidden"); };
+    if (close) close.onclick = closePaywall;
+    document.onkeydown = (e) => { if (e.key === "Escape" && !$("#paywall").classList.contains("hidden")) closePaywall(); };
   }
 
   // ---------- form ----------
@@ -52,7 +59,6 @@ const Famigo = (() => {
     $("#location").addEventListener("input", () => $("#location-hint").classList.add("hidden"));
     $("#plan-form").addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (plansUsed() >= FREE_PLANS) { showPaywall(); return; }
       const f = new FormData(e.target);
       const body = {
         location: f.get("location"), date: f.get("date"), budget: Number(f.get("budget")),
@@ -60,6 +66,7 @@ const Famigo = (() => {
         vibe: f.get("vibe"), notes: f.get("notes") || "",
         kids_ages: [...document.querySelectorAll("#kids select")].map((s) => Number(s.value)),
       };
+      if (plansUsed() >= FREE_PLANS) { pendingPlan = body; showPaywall(); return; }
       await requestPlan(body);
     });
   }
