@@ -49,6 +49,7 @@ const Famigo = (() => {
     $("#kids").appendChild(add);
     addKid(4); addKid(8);
 
+    $("#location").addEventListener("input", () => $("#location-hint").classList.add("hidden"));
     $("#plan-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       if (plansUsed() >= FREE_PLANS) { showPaywall(); return; }
@@ -67,6 +68,7 @@ const Famigo = (() => {
 
   async function requestPlan(body) {
     $("#form-error").classList.add("hidden");
+    $("#location-hint").classList.add("hidden");
     $("#hero").classList.add("hidden");
     $("#result").classList.add("hidden");
     $("#loading").classList.remove("hidden");
@@ -82,16 +84,18 @@ const Famigo = (() => {
       renderPlan(data);
     } catch (err) {
       $("#hero").classList.remove("hidden");
-      const el = $("#form-error"); el.textContent = err.message || "Something went wrong. Please try again.";
-      // «Did you mean…?» — клик подставляет город и сразу строит план
+      // «Did you mean…?» показываем прямо под полем города; клик подставляет город и сразу строит план
+      const el = err.suggestions?.length ? $("#location-hint") : $("#form-error");
+      el.textContent = err.message || "Something went wrong. Please try again.";
       (err.suggestions || []).forEach((s) => {
         const b = document.createElement("button");
         b.type = "button"; b.textContent = s;
-        b.className = "ml-2 mt-2 px-3 py-1.5 rounded-full bg-coral/10 text-coral-dark font-semibold hover:bg-coral/20";
+        b.className = "ml-2 mt-2 px-3 py-1.5 rounded-full bg-white text-coral-dark font-semibold shadow-sm hover:bg-coral/10";
         b.onclick = () => { $("#location").value = s; $("#plan-form").requestSubmit(); };
         el.appendChild(b);
       });
       el.classList.remove("hidden");
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
     } finally {
       clearInterval(tick);
       $("#loading").classList.add("hidden");

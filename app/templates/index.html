@@ -18,7 +18,8 @@
   <form id="plan-form" class="md:col-span-3 bg-white rounded-3xl shadow-xl shadow-ink/5 p-5 md:p-8 space-y-5">
     <div>
       <label class="lbl" for="location">City or ZIP</label>
-      <input id="location" name="location" required placeholder="Austin, TX" class="inp" autocomplete="off">
+      <input id="location" name="location" required placeholder="Austin, TX" class="inp" autocomplete="off" aria-describedby="location-hint">
+      <div id="location-hint" role="alert" class="hidden mt-2 rounded-2xl bg-sun/15 p-3 text-sm"></div>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
