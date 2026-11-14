@@ -9,7 +9,7 @@ from datetime import date
 
 import httpx
 
-from . import sources
+from . import cities, sources
 from .cache import cache_get, cache_set
 from .config import GEMINI_API_KEY, GEMINI_MODELS
 
@@ -17,7 +17,9 @@ log = logging.getLogger("famigo.planner")
 
 
 class PlanError(Exception):
-    pass
+    def __init__(self, message: str, suggestions: list | None = None):
+        super().__init__(message)
+        self.suggestions = suggestions or []
 
 
 # ---------- 1. Кандидаты ----------
@@ -194,6 +196,11 @@ async def ask_gemini(prompt: str):
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
+def _plus_2h(t: str) -> str:
+    h, m = map(int, t.split(":"))
+    return "21:00" if h + 2 >= 21 else f"{h + 2:02d}:{m:02d}"
+
+
 def validate_ai(ai: dict, by_id: dict):
     """Не доверяем ИИ вслепую: только существующие id, корректное время, без повторов, есть еда."""
     if not isinstance(ai, dict) or not isinstance(ai.get("items"), list):
@@ -208,10 +215,19 @@ def validate_ai(ai: dict, by_id: dict):
         start, end = str(it.get("start", "")), str(it.get("end", ""))
         if not TIME_RE.match(start) or not TIME_RE.match(end):
             continue
+        start, end = start.zfill(5), end.zfill(5)
+        x = by_id[iid]
+        if x["kind"] == "event" and x.get("start_time"):  # у события время фиксировано — ИИ не может его сдвинуть
+            start = x["start_time"]
+            if end <= start:
+                end = _plus_2h(start)
+        if end <= start:
+            continue
         seen.add(iid)
-        items.append({"id": iid, "start": start.zfill(5), "end": end.zfill(5),
+        items.append({"id": iid, "start": start, "end": end,
                       "why": str(it.get("why", ""))[:240]})
     items.sort(key=lambda x: x["start"])
+    items = items[:5]
     if len(items) < 2 or not any(by_id[i["id"]]["kind"] == "food" for i in items):
         return None
     return {"title": str(ai.get("title") or "Your family day")[:80],
@@ -253,8 +269,8 @@ def enforce_budget(plan: dict, req: dict, cands: dict, by_id: dict):
             items.remove(worst)  # заменить нечем — убираем пункт
         else:
             break
-    if len(items) < 2:
-        return None
+    if len(items) < 2 or sum(cost(i["id"]) for i in items) > budget:
+        return None  # не уложились — пусть строит запасной план
     return {**plan, "items": items}
 
 
@@ -285,7 +301,12 @@ def rule_plan(req, cands, weather):
     def affordable(pool):
         return [x for x in pool if (_cost(x, adults, kids) or 0) <= budget_left]
 
-    morning = _nearest(affordable(acts), None, used)
+    free_day = not affordable(food)
+    meals = [f for f in affordable(food) if not f["category"].startswith(("Ice cream", "Cafe"))]
+    # оставляем деньги на обед, чтобы утро не съело весь бюджет
+    reserve = min((_cost(f, adults, kids) or 0 for f in meals), default=0)
+    morning = _nearest([a for a in affordable(acts) if (_cost(a, adults, kids) or 0) <= budget_left - reserve],
+                       None, used)
     if morning:
         add(morning, "09:30", "11:30", "Indoor start since rain is likely." if rainy and morning["indoor"]
             else "Close to home and a good way to burn morning energy.")
@@ -293,7 +314,7 @@ def rule_plan(req, cands, weather):
     lunch = _nearest(lunch_pool, morning, used)
     if lunch:
         add(lunch, "12:00", "13:00", "Kid-friendly lunch nearby." if lunch["kid_friendly"] else "Quick lunch close to your morning stop.")
-    ev = next((e for e in affordable(evs) if e.get("start_time") and "12:00" < e["start_time"] < "19:00"), None)
+    ev = next((e for e in affordable(evs) if e.get("start_time") and "13:00" <= e["start_time"] < "19:00"), None)
     if ev:
         h, m = map(int, ev["start_time"].split(":"))
         add(ev, ev["start_time"], f"{min(h + 2, 21):02d}:{m:02d}", "A live event happening today that fits your budget.")
@@ -308,8 +329,9 @@ def rule_plan(req, cands, weather):
     items.sort(key=lambda x: x["start"])
     if len(items) < 2:
         return None
+    tip = "Pack a picnic — this day is free." if free_day else "Check opening hours before you leave."
     return {"title": "Your family day", "summary": "A balanced day built from what's open near you.",
-            "tip": "Check opening hours before you leave.", "items": items}
+            "tip": tip, "items": items}
 
 
 # ---------- 4. Главная функция ----------
@@ -317,6 +339,9 @@ def rule_plan(req, cands, weather):
 async def make_plan(req: dict) -> dict:
     geo = await sources.geocode(req["location"])
     if not geo:
+        hints = [] if req["location"].strip().isdigit() else [s["query"] for s in cities.suggest(req["location"])]
+        if hints:
+            raise PlanError(f"We couldn't find \"{req['location'].strip()}\". Did you mean:", hints)
         raise PlanError("We couldn't find that city or ZIP in the US. Try e.g. 'Austin, TX' or '78701'.")
     day = date.fromisoformat(req["date"])
     weather, evs, plc = await asyncio.gather(
@@ -342,7 +367,7 @@ async def make_plan(req: dict) -> dict:
     if plan:
         plan = enforce_budget(plan, req, cands, by_id)
     if not plan:
-        plan = rule_plan(req, cands, weather)
+        plan, ai_used = rule_plan(req, cands, weather), False
     if not plan:
         raise PlanError("Not enough options within your budget and distance. Try loosening the filters.")
 
@@ -386,8 +411,12 @@ def swap_item(plan: dict, index: int) -> dict:
     used = {i["place"]["id"] for i in items}
     tried = set(plan.get("swapped", []))
     req = plan["request"]
+    others = sum(i["family_cost"] or 0 for j, i in enumerate(items) if j != index)
     pool = [plan["pool"][i] for i in plan["alternatives"][group]
-            if i not in used and i not in tried and i in plan["pool"]]
+            if i not in used and i not in tried and i in plan["pool"]
+            and others + (_cost(plan["pool"][i], req["adults"], req["kids_ages"]) or 0) <= req["budget"]]
+    if cur["kind"] == "food" and not cur["category"].startswith(("Ice cream", "Cafe")):  # обед меняем на обед
+        pool = [x for x in pool if not x["category"].startswith(("Ice cream", "Cafe"))] or pool
     new = _nearest(pool, cur, set())
     if not new:
         raise PlanError("No more alternatives nearby. Try increasing the distance.")

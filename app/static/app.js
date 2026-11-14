@@ -2,6 +2,7 @@
 const Famigo = (() => {
   const FREE_PLANS = 3;
   const $ = (s, el = document) => el.querySelector(s);
+  const ymd = (d) => d.toLocaleDateString("sv"); // локальная дата YYYY-MM-DD (toISOString — это UTC)
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ---------- free-plan counter (stored per browser; no login needed) ----------
@@ -17,10 +18,11 @@ const Famigo = (() => {
     const left = Math.max(0, FREE_PLANS - plansUsed());
     el.textContent = left > 0 ? `${left} free plan${left === 1 ? "" : "s"} left this month` : "Free plans used";
   }
-  function showPaywall() { $("#paywall").classList.remove("hidden"); }
+  function showPaywall() { $("#paywall").classList.remove("hidden"); $("#paywall-close").focus(); }
   function initPaywall() {
     const close = $("#paywall-close");
     if (close) close.onclick = () => $("#paywall").classList.add("hidden");
+    document.onkeydown = (e) => { if (e.key === "Escape") $("#paywall").classList.add("hidden"); };
   }
 
   // ---------- form ----------
@@ -36,12 +38,12 @@ const Famigo = (() => {
   function initForm() {
     initPaywall(); updateFreeLeft();
     const d = new Date(); const sat = new Date(d); sat.setDate(d.getDate() + ((6 - d.getDay() + 7) % 7));
-    $("#date").value = sat.toISOString().slice(0, 10);
-    $("#date").min = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
-    $("#date").max = new Date(Date.now() + 15 * 864e5).toISOString().slice(0, 10);
+    $("#date").value = ymd(sat);
+    $("#date").min = ymd(new Date(Date.now() - 864e5));
+    $("#date").max = ymd(new Date(Date.now() + 15 * 864e5));
     const add = document.createElement("button");
     add.type = "button"; add.id = "add-kid";
-    add.className = "text-sm font-semibold text-coral px-3 py-2 rounded-full hover:bg-coral/10";
+    add.className = "text-sm font-semibold text-coral-dark px-3 py-2 rounded-full hover:bg-coral/10";
     add.textContent = "+ Add kid";
     add.onclick = () => addKid(5);
     $("#kids").appendChild(add);
@@ -61,7 +63,7 @@ const Famigo = (() => {
     });
   }
 
-  const STEPS = ["🌦️ Checking the forecast", "🎟️ Looking for events that day", "🌳 Finding parks, museums & places to eat", "🧠 Fitting it to your kids and budget"];
+  const STEPS = ["🌦️ Checking the forecast", window.HAS_EVENTS && "🎟️ Looking for events that day", "🌳 Finding parks, museums & places to eat", "🧠 Fitting it to your kids and budget"].filter(Boolean);
 
   async function requestPlan(body) {
     $("#form-error").classList.add("hidden");
@@ -74,13 +76,22 @@ const Famigo = (() => {
     try {
       const r = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await r.json();
-      if (!r.ok) throw new Error(errorText(data));
+      if (!r.ok) throw Object.assign(new Error(errorText(data)), { suggestions: data.detail?.suggestions });
       countPlan();
       history.pushState({}, "", `/p/${data.id}`);
       renderPlan(data);
     } catch (err) {
       $("#hero").classList.remove("hidden");
-      const el = $("#form-error"); el.textContent = err.message || "Something went wrong. Please try again."; el.classList.remove("hidden");
+      const el = $("#form-error"); el.textContent = err.message || "Something went wrong. Please try again.";
+      // «Did you mean…?» — клик подставляет город и сразу строит план
+      (err.suggestions || []).forEach((s) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.textContent = s;
+        b.className = "ml-2 mt-2 px-3 py-1.5 rounded-full bg-coral/10 text-coral-dark font-semibold hover:bg-coral/20";
+        b.onclick = () => { $("#location").value = s; $("#plan-form").requestSubmit(); };
+        el.appendChild(b);
+      });
+      el.classList.remove("hidden");
     } finally {
       clearInterval(tick);
       $("#loading").classList.add("hidden");
@@ -89,6 +100,7 @@ const Famigo = (() => {
 
   function errorText(data) {
     if (typeof data.detail === "string") return data.detail;
+    if (data.detail?.message) return data.detail.message;
     if (Array.isArray(data.detail)) return data.detail.map((d) => (d.msg || "").replace("Value error, ", "")).join(". ");
     return "Something went wrong. Please try again.";
   }
@@ -119,10 +131,10 @@ const Famigo = (() => {
     const over = plan.total_cost > req.budget;
     el.innerHTML = `
       <div class="fade-in">
-        ${opts.shared ? "" : `<button id="back" class="text-sm text-ink/60 hover:text-ink mb-4">← New plan</button>`}
+        ${opts.shared ? "" : `<button id="back" class="text-sm text-ink/70 hover:text-ink mb-4 py-2">← New plan</button>`}
         <div class="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-ink/5 mb-6">
-          <p class="text-sm text-ink/60 mb-1">${esc(dateStr)} · ${esc(plan.location.label)}</p>
-          <h2 class="font-display text-3xl md:text-4xl font-bold leading-tight mb-2">${esc(plan.title)}</h2>
+          <p class="text-sm text-ink/70 mb-1">${esc(dateStr)} · ${esc(plan.location.label)}</p>
+          <h2 tabindex="-1" class="font-display outline-none text-3xl md:text-4xl font-bold leading-tight mb-2">${esc(plan.title)}</h2>
           <p class="text-ink/70 mb-5">${esc(plan.summary)}</p>
           <div class="flex flex-wrap gap-2 text-sm">
             ${wx ? `<span class="bg-sun/15 px-3 py-1.5 rounded-full">🌡️ ${esc(wx.summary)} · ${wx.high_f}°/${wx.low_f}°F · ${wx.rain_chance}% rain</span>` : ""}
@@ -141,15 +153,16 @@ const Famigo = (() => {
           <button id="share" class="flex-1 bg-ink text-white font-semibold py-3.5 rounded-2xl hover:bg-ink/90">🔗 Share with your partner</button>
           ${opts.shared ? `<a href="/" class="flex-1 text-center bg-coral text-white font-semibold py-3.5 rounded-2xl hover:bg-coral/90">Plan your own day →</a>` : ""}
         </div>
-        <p class="text-xs text-ink/40 mt-6 text-center">
-          ${plan.ai_used ? "Plan composed by AI from" : "Plan built from"} live data: Open-Meteo, Ticketmaster, OpenStreetMap. Prices marked "est." are estimates — check before you go.
+        <p class="text-xs text-ink/70 mt-6 text-center">
+          ${plan.ai_used ? "Plan composed by AI from" : "Plan built from"} live data: Open-Meteo, ${plan.items.some((i) => i.place.kind === "event") ? "Ticketmaster, " : ""}OpenStreetMap. Prices marked "est." are estimates — check before you go.
         </p>
       </div>`;
     el.classList.remove("hidden");
     window.scrollTo({ top: 0, behavior: "smooth" });
+    $("#result h2").focus({ preventScroll: true });
 
     const back = $("#back");
-    if (back) back.onclick = () => { history.pushState({}, "", "/"); el.classList.add("hidden"); $("#hero").classList.remove("hidden"); };
+    if (back) back.onclick = () => { history.pushState({}, "", "/"); el.classList.add("hidden"); $("#hero").classList.remove("hidden"); $("#location").focus(); };
     $("#share").onclick = async () => {
       const url = `${location.origin}/p/${plan.id}`;
       if (navigator.share) { try { await navigator.share({ title: plan.title, url }); return; } catch {} }
@@ -160,30 +173,31 @@ const Famigo = (() => {
 
   function item(it, i, opts) {
     const p = it.place;
-    const link = p.kind === "event" && p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener" class="text-coral font-semibold">Tickets ↗</a>` : "";
+    const link = p.kind === "event" && p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener" class="text-coral-dark font-semibold py-2">Tickets ↗</a>` : "";
     return `
       <li class="flex gap-4 fade-in" style="animation-delay:${i * 80}ms">
-        <div class="dot">${icon(p)}</div>
+        <div class="dot" aria-hidden="true">${icon(p)}</div>
         <div class="flex-1 bg-white rounded-2xl p-5 shadow-md shadow-ink/5">
           <div class="flex items-start justify-between gap-3 mb-1">
-            <p class="text-sm font-semibold text-coral">${t12(it.start)} – ${t12(it.end)}</p>
+            <p class="text-sm font-semibold text-coral-dark">${t12(it.start)} – ${t12(it.end)}</p>
             <p class="text-sm font-semibold whitespace-nowrap">${esc(costLabel(it))}</p>
           </div>
           <h3 class="text-lg font-semibold leading-snug">${esc(p.name)}</h3>
-          <p class="text-sm text-ink/60 mb-2">${esc(p.category)} · ${p.distance_mi} mi${p.place ? ` · ${esc(p.place)}` : ""}</p>
+          <p class="text-sm text-ink/70 mb-2">${esc(p.category)} · ${p.distance_mi} mi${p.place ? ` · ${esc(p.place)}` : ""}</p>
           <p class="text-ink/80 mb-3">${esc(it.why)}</p>
           <div class="flex flex-wrap gap-4 text-sm">
-            <a href="${maps(p)}" target="_blank" rel="noopener" class="text-ink/70 hover:text-ink">📍 Directions</a>
+            <a href="${maps(p)}" target="_blank" rel="noopener" class="text-ink/70 hover:text-ink py-2">📍 Directions</a>
             ${link}
-            ${opts.shared || p.kind === "event" ? "" : `<button data-swap="${i}" class="text-ink/70 hover:text-ink">🔄 Swap</button>`}
+            ${opts.shared || p.kind === "event" ? "" : `<button data-swap="${i}" class="text-ink/70 hover:text-ink py-2">🔄 Swap</button>`}
           </div>
         </div>
       </li>`;
   }
 
   async function swap(plan, index, opts) {
-    const r = await fetch(`/api/plan/${plan.id}/swap/${index}`, { method: "POST" });
-    const data = await r.json();
+    let r, data;
+    try { r = await fetch(`/api/plan/${plan.id}/swap/${index}`, { method: "POST" }); data = await r.json(); }
+    catch { alert("Network error. Please try again."); return; }
     if (!r.ok) { alert(errorText(data)); return; }
     renderPlan(data, opts);
   }

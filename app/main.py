@@ -3,14 +3,14 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
 
 from .cache import plan_get, plan_save
-from .config import GEMINI_API_KEY, STRIPE_PAYMENT_LINK, TICKETMASTER_API_KEY
+from .config import GEMINI_API_KEY, GEOAPIFY_API_KEY, STRIPE_PAYMENT_LINK, TICKETMASTER_API_KEY
 from .planner import PlanError, make_plan, swap_item
 
 logging.basicConfig(level=logging.INFO)
@@ -52,7 +52,8 @@ def _public(plan: dict) -> dict:
 
 
 def _page_ctx(request: Request, **extra):
-    return {"request": request, "stripe_link": STRIPE_PAYMENT_LINK, **extra}
+    return {"request": request, "stripe_link": STRIPE_PAYMENT_LINK,
+            "has_events": bool(TICKETMASTER_API_KEY), **extra}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -74,7 +75,7 @@ async def api_plan(body: PlanRequest):
     try:
         plan = await make_plan(req)
     except PlanError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, {"message": str(e), "suggestions": e.suggestions} if e.suggestions else str(e))
     plan_save(plan["id"], plan)
     return _public(plan)
 
@@ -101,7 +102,7 @@ def api_swap(plan_id: str, index: int):
 
 
 @app.get("/debug")
-async def debug(location: str = "Austin, TX", miles: int = 15):
+async def debug(location: str = Query("Austin, TX", max_length=80), miles: int = Query(15, ge=1, le=50)):
     """Диагностика: что вернул каждый источник данных."""
     from . import sources
     geo = await sources.geocode(location)
@@ -122,4 +123,5 @@ async def debug(location: str = "Austin, TX", miles: int = 15):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "gemini": bool(GEMINI_API_KEY), "ticketmaster": bool(TICKETMASTER_API_KEY)}
+    return {"ok": True, "gemini": bool(GEMINI_API_KEY), "geoapify": bool(GEOAPIFY_API_KEY),
+            "ticketmaster": bool(TICKETMASTER_API_KEY)}

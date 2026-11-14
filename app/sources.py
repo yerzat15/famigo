@@ -7,6 +7,7 @@ from datetime import date
 
 import httpx
 
+from . import cities
 from .cache import cache_get, cache_set
 from .config import GEOAPIFY_API_KEY, HTTP_TIMEOUT, OVERPASS_URLS, TICKETMASTER_API_KEY, USER_AGENT
 
@@ -43,26 +44,29 @@ async def geocode(query: str):
                 r = await c.get("https://geocoding-api.open-meteo.com/v1/search",
                                 params={"name": name, "count": 10, "countryCode": "US"})
                 results = r.json().get("results") or []
-                # если указан штат ("Austin, TX"), предпочитаем совпадение по штату
-                state = query.split(",")[1].strip().lower() if "," in query else ""
+                # если указан штат ("Austin, TX"), берём только этот штат: иначе опечатка уведёт в другой город
+                state = cities.parse(query)[1]
                 if state:
-                    results = sorted(results, key=lambda x: state not in (
-                        (x.get("admin1") or "").lower() + " " + (x.get("admin1_code") or "").lower()))
+                    results = [x for x in results if (x.get("admin1") or "").lower() == cities.STATE_NAMES[state].lower()]
                 if results:
                     x = results[0]
                     result = {"lat": x["latitude"], "lng": x["longitude"],
                               "label": f'{x["name"]}, {x.get("admin1", "")}'.strip(", ")}
             except Exception as e:  # noqa: BLE001
                 log.warning("open-meteo geocode failed: %s", e)
-        if result is None:
+            if result is None:  # «austin texas» без запятой — точное совпадение по справочнику
+                if hit := cities.exact(query):
+                    result = {k: hit[k] for k in ("lat", "lng", "label")}
+        else:
             # Nominatim: понимает ZIP-коды США
             try:
                 r = await c.get("https://nominatim.openstreetmap.org/search",
                                 params={"q": query, "countrycodes": "us", "format": "json", "limit": 1})
                 data = r.json()
                 if data:
-                    result = {"lat": float(data[0]["lat"]), "lng": float(data[0]["lon"]),
-                              "label": data[0]["display_name"].split(",")[0] + (f" ({query})" if query.isdigit() else "")}
+                    parts = data[0]["display_name"].split(", ")  # для ZIP: "10001, Manhattan, ..."
+                    label = f"{parts[1]} ({query})" if query.isdigit() and len(parts) > 1 else parts[0]
+                    result = {"lat": float(data[0]["lat"]), "lng": float(data[0]["lon"]), "label": label}
             except Exception as e:  # noqa: BLE001
                 log.warning("nominatim geocode failed: %s", e)
     if result:
@@ -224,7 +228,7 @@ def _overpass_query(lat, lng, radius_m):
 async def places(lat: float, lng: float, radius_miles: int):
     # места меняются редко — кешируем на неделю; координаты округляем, чтобы кеш срабатывал чаще
     rlat, rlng = round(lat, 2), round(lng, 2)
-    radius_m = int(min(radius_miles, 15) * 1609)
+    radius_m = int(min(radius_miles, 25) * 1609)  # 25 — максимум в форме
     key = f"osm:{rlat}:{rlng}:{radius_m}"
     if (hit := cache_get(key)) is not None:
         return hit
@@ -350,6 +354,8 @@ def _parse_osm(el: dict, lat: float, lng: float):
     for k, v, cat, indoor, price in PLACE_RULES:
         if tags.get(k) == v:
             if v == "swimming_pool" and tags.get("access") in ("private", "customers"):
+                return None
+            if v == "playground" and tags.get("playground"):  # отдельная горка/качели внутри площадки, а не место
                 return None
             kind, food = "place", False
             break

@@ -1,7 +1,8 @@
-import json, os, sys
+import json, os, sys, tempfile
+DB = os.path.join(tempfile.gettempdir(), "wk_test.db")
 from datetime import date, timedelta
-os.environ.update(GEMINI_API_KEY="test", TICKETMASTER_API_KEY="test", DB_PATH="/tmp/wk_test.db")
-if os.path.exists("/tmp/wk_test.db"): os.remove("/tmp/wk_test.db")
+os.environ.update(GEMINI_API_KEY="test", TICKETMASTER_API_KEY="test", GEOAPIFY_API_KEY="", DB_PATH=DB)
+if os.path.exists(DB): os.remove(DB)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import httpx, respx
 from fastapi.testclient import TestClient
@@ -74,7 +75,6 @@ with respx.mock(assert_all_called=False):
     assert c.get("/").status_code == 200
 
 # 3) Gemini 429 on all models -> rule-based fallback
-if os.path.exists("/tmp/wk_test.db"): pass
 body2 = {**body, "budget": 119}  # different key -> no AI cache
 with respx.mock(assert_all_called=False) as r:
     g = setup(r, lambda req: httpx.Response(429, json={"error":"quota"}))
@@ -116,4 +116,39 @@ with respx.mock(assert_all_called=False) as r:
     print("Budget-enforced:", [(i["place"]["name"], i["family_cost"]) for i in p["items"]], "total", p["total_cost"], "of", 60)
     assert p["ai_used"] and p["total_cost"] <= 60, p["total_cost"]
     assert any(i["place"]["kind"] == "food" for i in p["items"])
+
+# 7) swap never pushes total over budget
+with respx.mock(assert_all_called=False):
+    for n in range(len(p["items"])):
+        for _ in range(4):
+            s = c.post(f"/api/plan/{p['id']}/swap/{n}")
+            if s.status_code != 200: break
+            assert s.json()["total_cost"] <= 60, s.json()["total_cost"]
+    print("swaps within budget:", [(i["place"]["name"], i["family_cost"]) for i in s.json().get("items", [])] if s.status_code == 200 else s.status_code)
+
+# 8) fallback: museum+lunch doesn't fit 61 -> lunch still included
+with respx.mock(assert_all_called=False) as r:
+    setup(r, lambda req: httpx.Response(429))
+    p = c.post("/api/plan", json={**body, "budget": 61}).json()
+    print("Tight fallback:", [(i["place"]["name"], i["family_cost"]) for i in p["items"]], "total", p["total_cost"])
+    assert any(i["place"]["kind"] == "food" for i in p["items"]) and p["total_cost"] <= 61
+
+# 9) budget 0 -> free day, no failure
+with respx.mock(assert_all_called=False) as r:
+    setup(r, lambda req: httpx.Response(429))
+    res = c.post("/api/plan", json={**body, "budget": 0}); assert res.status_code == 200, res.text
+    p = res.json(); print("Free day:", [i["place"]["name"] for i in p["items"]], p["tip"])
+    assert p["total_cost"] == 0 and all(i["family_cost"] == 0 for i in p["items"])
+
+# 10) AI plan can't fit the budget -> rule plan, ai_used False
+def gemini_two_meals(req):
+    out = {"title":"Food day","summary":"s","tip":"t","items":[
+        {"id":"osm_n6","start":"12:00","end":"13:00","why":"lunch"},   # Burger 36
+        {"id":"osm_n5","start":"13:30","end":"14:00","why":"treat"}]}  # Lick 20 => 56 > 40
+    return httpx.Response(200, json={"candidates":[{"content":{"parts":[{"text":json.dumps(out)}]}}]})
+with respx.mock(assert_all_called=False) as r:
+    setup(r, gemini_two_meals)
+    p = c.post("/api/plan", json={**body, "budget": 40}).json()
+    print("AI replaced:", [i["place"]["name"] for i in p["items"]], "ai", p["ai_used"], p["model"])
+    assert p["ai_used"] is False and p["model"] is None and p["total_cost"] <= 40
 print("ALL OK 2")

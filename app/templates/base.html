@@ -11,7 +11,7 @@
   <script>
     tailwind.config = { theme: { extend: {
       fontFamily: { display: ['Fraunces', 'serif'], sans: ['Inter', 'system-ui', 'sans-serif'] },
-      colors: { sun: '#FFB020', coral: '#FF6B4A', ink: '#1F2937', cream: '#FFF8EE', leaf: '#2F9E6E' }
+      colors: { sun: '#FFB020', coral: { DEFAULT: '#FF6B4A', dark: '#C93E22' }, ink: '#1F2937', cream: '#FFF8EE', leaf: '#2F9E6E' }
     } } };
   </script>
   <link rel="stylesheet" href="/static/app.css">
@@ -19,10 +19,10 @@
 <body class="bg-cream text-ink font-sans antialiased min-h-screen">
   <header class="max-w-5xl mx-auto px-5 py-5 flex items-center justify-between">
     <a href="/" class="flex items-center gap-2">
-      <span class="text-2xl">☀️</span>
+      <span class="text-2xl" aria-hidden="true">☀️</span>
       <span class="font-display text-2xl font-bold tracking-tight">Famigo</span>
     </a>
-    <span id="free-left" class="text-sm text-ink/60"></span>
+    <span id="free-left" class="text-sm text-ink/70"></span>
   </header>
 
   <main class="max-w-5xl mx-auto px-5 pb-20">
@@ -30,22 +30,22 @@
   </main>
 
   <!-- Paywall -->
-  <div id="paywall" class="hidden fixed inset-0 bg-ink/50 backdrop-blur-sm z-50 flex items-center justify-center p-5">
+  <div id="paywall" role="dialog" aria-modal="true" aria-labelledby="paywall-title" class="hidden fixed inset-0 bg-ink/50 backdrop-blur-sm z-50 flex items-center justify-center p-5">
     <div class="bg-white rounded-3xl max-w-md w-full p-7 shadow-2xl">
-      <div class="text-4xl mb-3">🎟️</div>
-      <h3 class="font-display text-2xl font-bold mb-2">You've used your free plans</h3>
+      <div class="text-4xl mb-3" aria-hidden="true">🎟️</div>
+      <h3 id="paywall-title" class="font-display text-2xl font-bold mb-2">You've used your free plans</h3>
       <p class="text-ink/70 mb-5">Famigo Family plans every weekend for you — unlimited plans, a ready plan every Friday at 6pm, and school-break week planners.</p>
-      <div class="flex items-baseline gap-1 mb-5"><span class="text-4xl font-bold">$6.99</span><span class="text-ink/60">/ month · cancel anytime</span></div>
+      <div class="flex items-baseline gap-1 mb-5"><span class="text-4xl font-bold">$6.99</span><span class="text-ink/70">/ month · cancel anytime</span></div>
       {% if stripe_link %}
       <a href="{{ stripe_link }}" target="_blank" rel="noopener" class="block text-center w-full bg-coral hover:bg-coral/90 text-white font-semibold py-3.5 rounded-2xl">Start 7-day free trial</a>
       {% else %}
       <button disabled class="w-full bg-coral/60 text-white font-semibold py-3.5 rounded-2xl">Subscriptions launching soon</button>
       {% endif %}
-      <button id="paywall-close" class="w-full mt-3 text-ink/60 hover:text-ink text-sm py-2">Maybe later</button>
+      <button id="paywall-close" class="w-full mt-3 text-ink/70 hover:text-ink text-sm py-2">Maybe later</button>
     </div>
   </div>
 
-  <script>window.STRIPE_LINK = {{ stripe_link|tojson }};</script>
+  <script>window.STRIPE_LINK = {{ stripe_link|tojson }}; window.HAS_EVENTS = {{ has_events|tojson }};</script>
   <script src="/static/app.js"></script>
   {% block scripts %}{% endblock %}
 </body>
