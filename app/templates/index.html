@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<section id="hero" class="grid md:grid-cols-5 gap-10 items-start pt-4 md:pt-10">
+  <div class="md:col-span-2 md:sticky md:top-8">
+    <p class="inline-block bg-sun/20 text-ink/80 text-sm font-medium px-3 py-1 rounded-full mb-4">For busy parents</p>
+    <h1 class="font-display text-4xl md:text-5xl font-bold leading-[1.05] mb-4">
+      Your family weekend,<br><span class="text-coral">planned in 30 seconds.</span>
+    </h1>
+    <p class="text-lg text-ink/70 mb-6">Tell us where you are, your budget and your kids' ages. We check the weather, real events and places nearby — and hand you a ready-to-go day.</p>
+    <ul class="space-y-2 text-ink/80">
+      <li>🌦️ Adapts to the forecast</li>
+      <li>💸 Stays inside your budget</li>
+      <li>🧒 Fits your kids' ages</li>
+      <li>📍 Real places, real events — no ads</li>
+    </ul>
+  </div>
+
+  <form id="plan-form" class="md:col-span-3 bg-white rounded-3xl shadow-xl shadow-ink/5 p-6 md:p-8 space-y-5">
+    <div>
+      <label class="lbl" for="location">City or ZIP</label>
+      <input id="location" name="location" required placeholder="Austin, TX" class="inp" autocomplete="off">
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="lbl" for="date">Day</label>
+        <input id="date" name="date" type="date" required class="inp">
+      </div>
+      <div>
+        <label class="lbl" for="budget">Budget for the day</label>
+        <div class="relative">
+          <span class="absolute left-4 top-1/2 -translate-y-1/2 text-ink/50">$</span>
+          <input id="budget" name="budget" type="number" min="0" max="2000" value="100" required class="inp pl-8">
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="lbl" for="adults">Adults</label>
+        <select id="adults" name="adults" class="inp">
+          <option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option>
+        </select>
+      </div>
+      <div>
+        <label class="lbl" for="max_miles">Max drive</label>
+        <select id="max_miles" name="max_miles" class="inp">
+          <option value="5">5 miles</option><option value="10">10 miles</option>
+          <option value="15" selected>15 miles</option><option value="25">25 miles</option>
+        </select>
+      </div>
+    </div>
+
+    <div>
+      <span class="lbl">Kids' ages</span>
+      <div id="kids" class="flex flex-wrap gap-2 items-center"></div>
+    </div>
+
+    <div>
+      <span class="lbl">Vibe</span>
+      <div class="grid grid-cols-3 gap-2" id="vibe">
+        <label class="chip"><input type="radio" name="vibe" value="any" checked class="sr-only">✨ Anything</label>
+        <label class="chip"><input type="radio" name="vibe" value="outdoor" class="sr-only">🌳 Outdoors</label>
+        <label class="chip"><input type="radio" name="vibe" value="indoor" class="sr-only">🏛️ Indoors</label>
+      </div>
+    </div>
+
+    <div>
+      <label class="lbl" for="notes">Anything else? <span class="font-normal text-ink/50">(optional)</span></label>
+      <input id="notes" name="notes" maxlength="200" placeholder="My son loves dinosaurs, toddler naps at 1pm" class="inp">
+    </div>
+
+    <button id="submit" type="submit" class="w-full bg-coral hover:bg-coral/90 active:scale-[.99] transition text-white text-lg font-semibold py-4 rounded-2xl shadow-lg shadow-coral/30">
+      Plan my day →
+    </button>
+    <p id="form-error" class="hidden text-coral text-sm"></p>
+  </form>
+</section>
+
+<section id="loading" class="hidden max-w-2xl mx-auto pt-10">
+  <div class="bg-white rounded-3xl p-8 shadow-xl shadow-ink/5">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="h-6 w-6 rounded-full border-4 border-sun border-t-transparent animate-spin"></div>
+      <p class="font-display text-xl font-semibold">Planning your day…</p>
+    </div>
+    <ul id="loading-steps" class="space-y-3 text-ink/70"></ul>
+  </div>
+</section>
+
+<section id="result" class="hidden max-w-2xl mx-auto pt-4"></section>
+{% endblock %}
+
+{% block scripts %}
+<script>Famigo.initForm();</script>
+{% endblock %}
